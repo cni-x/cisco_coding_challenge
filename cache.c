@@ -181,6 +181,39 @@ void cache_set(const char *key,unsigned int keylen,const char *data,unsigned int
   cache_motion += entrylen;
 }
 
+// handles challenge 3
+void cache_delete(const char *key,unsigned int keylen) {
+  uint32 pos;
+  uint32 prevpos;
+  uint32 nextpos;
+  uint32 u;
+
+  if (!x) return;
+  if (keylen > MAXKEYLEN) return;
+
+  prevpos = hash(key,keylen);
+  pos = get4(prevpos);
+
+  while (pos) {
+    if (get4(pos + 4) == keylen) {
+      if (pos + 20 + keylen > size) cache_impossible();
+      if (byte_equal(key,keylen,x + pos + 20)) {
+        u = get4(pos + 8);
+        if (u > size - pos - 20 - keylen) cache_impossible();
+        nextpos = prevpos ^ get4(pos);
+        set4(prevpos, get4(prevpos) ^ pos ^ nextpos);
+        if (nextpos) set4(nextpos, get4(nextpos) ^ pos ^ prevpos);
+        return;
+      }
+    }
+    nextpos = prevpos ^ get4(pos);
+    prevpos = pos;
+    pos = nextpos;
+  }
+
+  return;
+}
+
 int cache_init(unsigned int cachesize)
 {
   if (x) {

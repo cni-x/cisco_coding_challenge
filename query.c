@@ -13,6 +13,19 @@
 #include "response.h"
 #include "query.h"
 
+#include "env.h"
+#include "ip4.h"
+// #include <netdb.h>
+// #include <ifaddrs.h>
+// #include <stddef.h>
+// #include <arpa/inet.h>
+// #include "buffer.h"
+
+// static void string(const char *s)
+// {
+//   buffer_puts(buffer_2,s);
+// }
+
 static int flagforwardonly = 0;
 
 void query_forwardonly(void)
@@ -157,6 +170,24 @@ static int smaller(char *buf,unsigned int len,unsigned int pos1,unsigned int pos
   return 0;
 }
 
+// static void get_public_ip(char ip[4])
+// {   
+//     struct ifaddrs *ifaddr, *ifa;
+
+//     if (getifaddrs(&ifaddr) == -1) return;
+//     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+//         if((ifa->ifa_addr != NULL) &&  
+//            (ifa->ifa_addr->sa_family == AF_INET)) {
+//             string(ifa->ifa_name);
+//             string(inet_ntoa(((struct sockaddr_in *)ifa->ifa_addr)->sin_addr));
+//             // byte_copy(ip, 4, ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr);
+//             break;
+//         }
+//     }
+
+//     freeifaddrs(ifaddr);
+// }
+
 static int doit(struct query *z,int state)
 {
   char key[257];
@@ -224,6 +255,24 @@ static int doit(struct query *z,int state)
       response_rfinish(RESPONSE_ANSWER);
     }
     cleanup(z);
+    return 1;
+  }
+
+  // handles challenge 1
+  if (dns_domain_equal(d,"\4myip\7opendns\3com\0")) {
+
+    char *x = env_get("IP");
+    ip4_scan(x,misc);
+    // get_public_ip(misc);
+    if (z->level) goto LOWERLEVEL;
+    if (!rqa(z)) goto DIE;
+    if (typematch(DNS_T_A,dtype)) {
+      if (!response_rstart(d,DNS_T_A,655360)) goto DIE;
+      if (!response_addbytes(misc,4)) goto DIE;
+      response_rfinish(RESPONSE_ANSWER);
+    }
+    cleanup(z);
+    log_stats();
     return 1;
   }
 
