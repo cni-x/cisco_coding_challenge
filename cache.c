@@ -5,6 +5,11 @@
 #include "tai.h"
 #include "cache.h"
 
+#include "stdio.h"
+#include "stdlib.h" 
+#include "string.h"
+#include "stdbool.h"
+
 uint64 cache_motion = 0;
 
 static char *x = 0;
@@ -42,6 +47,90 @@ Each entry contains the following information:
 
 #define MAXKEYLEN 1000
 #define MAXDATALEN 1000000
+
+// handles challenges 4 
+// new feature: delete the cache entries for all subdomains of a domain
+// used a trie to record the pos of each domain
+
+#define CHAR_SIZE 37 // a-z0-9.
+
+typedef struct trieNode 
+{ 
+  bool isLeaf; 
+  uint32 pos; 
+  char *dn;
+  struct trieNode *child[CHAR_SIZE]; 
+} trieNode; 
+
+static trieNode *root;
+
+// initialize a trie node
+trieNode *newTrieNode() 
+{ 
+  trieNode *newNode = (trieNode *) alloc(sizeof(trieNode)); 
+  newNode->isLeaf = false; 
+  newNode->pos = 0; 
+  newNode->dn = NULL; 
+  for (int i = 0; i<CHAR_SIZE; i++) 
+      newNode->child[i] = NULL; 
+  return newNode; 
+}
+
+int getIndex(char c) 
+{ 
+  if (c == '.') return 0;
+  if (c >= '0' && c <= '9') return (c - '0') + 1;
+  return c - 'a' + 11;
+} 
+
+// insert a key into the trie
+void trie_insert(trieNode *root, const char *key, unsigned int keylen, uint32 pos) 
+{ 
+  trieNode *p = root; 
+  for (int i = 0; i < keylen; i++) 
+  { 
+      int index = getIndex(key[i]); 
+      if (!p->child[index]) 
+          p->child[index] = newTrieNode(); 
+      p = p->child[index]; 
+  } 
+
+  p->isLeaf = true;
+  p->dn = alloc(MAXKEYLEN);
+  strcpy(p->dn, key);
+  p->pos = pos;
+}
+
+
+void entry_delete(const char *key,unsigned int keylen);
+// delete a key and its descendants from the trie
+void trie_delete(trieNode* root, const char* domain, int domainlen, int depth)
+{
+  unsigned int pos;
+  int keylen;
+  // reach the leaf node
+  if (root->isLeaf) {
+    pos = root->pos;
+    entry_delete(root->dn, strlen(root->dn));
+  }
+  root->isLeaf = false;
+  alloc_free(root->dn);
+  alloc_free(root);
+  return;
+  
+  // search domain node
+  if (depth < domainlen) {
+    int index = getIndex(domain[depth]);
+    trie_delete(root->child[index], domain, domainlen, depth+1);
+    return;
+  }
+
+  // delete all descendants
+  for (int i = 0; i < CHAR_SIZE; i++) {
+    if (root->child[i]) trie_delete(root->child[i], domain, domainlen, depth+1);
+  }
+  return;
+}
 
 static void cache_impossible(void)
 {
@@ -179,10 +268,19 @@ void cache_set(const char *key,unsigned int keylen,const char *data,unsigned int
   set4(keyhash,writer);
   writer += entrylen;
   cache_motion += entrylen;
+
+  // add the entry to the trie
+  trie_insert(root, key, keylen, pos);
 }
 
 // handles challenge 3
-void cache_delete(const char *key,unsigned int keylen) {
+void cache_delete(const char *key,unsigned int keylen)
+{
+  trie_delete(root, key, keylen, 0);
+}
+
+void entry_delete(const char *key,unsigned int keylen)
+{
   uint32 pos;
   uint32 prevpos;
   uint32 nextpos;
@@ -198,6 +296,7 @@ void cache_delete(const char *key,unsigned int keylen) {
     if (get4(pos + 4) == keylen) {
       if (pos + 20 + keylen > size) cache_impossible();
       if (byte_equal(key,keylen,x + pos + 20)) {
+        // change the prevpos pointer to nextpos
         u = get4(pos + 8);
         if (u > size - pos - 20 - keylen) cache_impossible();
         nextpos = prevpos ^ get4(pos);
@@ -235,6 +334,9 @@ int cache_init(unsigned int cachesize)
   writer = hsize;
   oldest = size;
   unused = size;
+
+  // initialize the trie
+  root = newTrieNode();
 
   return 1;
 }
